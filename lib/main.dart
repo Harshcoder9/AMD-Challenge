@@ -17,8 +17,8 @@ import 'screens/health_profile_screen.dart';
 // 🔑  REPLACE THIS WITH YOUR REAL GEMINI API KEY
 // Get one free at: https://aistudio.google.com/app/apikey
 // Leave it as-is to run in safe demo mode (simulated responses, no real calls)
-const _kGeminiApiKey = 'YOUR_GEMINI_API_KEY_HERE';
-const _kDemoMode = _kGeminiApiKey == 'YOUR_GEMINI_API_KEY_HERE';
+const _kGeminiApiKey = 'AIzaSyAXhrLsVLjRwx3Qe57lcKWKzBy_g2rwKsk';
+const _kDemoMode = _kGeminiApiKey == 'AIzaSyCyt2MscCvBPpHG1YLUFV4Av4DKDsu88ag';
 // ─────────────────────────────────────────────
 
 // Challenge model class
@@ -93,7 +93,7 @@ void main() async {
       ),
     );
   } catch (e) {
-    print('Firebase initialization error: $e');
+    debugPrint('Firebase initialization error: $e');
     // Continue without Firebase for development
   }
 
@@ -205,6 +205,25 @@ class ChatMessage {
   }) : timestamp = timestamp ?? DateTime.now();
 }
 
+// Challenge history statistics model
+class ChallengeStats {
+  final int streakDays;
+  final int totalDaysTracked;
+  final int avgCalories;
+  final int avgProtein;
+  final int avgCarbs;
+  final int goalHitRate; // 0–100 percentage
+
+  ChallengeStats({
+    required this.streakDays,
+    required this.totalDaysTracked,
+    required this.avgCalories,
+    required this.avgProtein,
+    required this.avgCarbs,
+    required this.goalHitRate,
+  });
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -227,6 +246,12 @@ class _HomePageState extends State<HomePage> {
   final List<Map<String, String>> _conversationHistory = [];
   // Whether we are awaiting a recipe paste for Recipe Healthify
   bool _awaitingRecipe = false;
+  // Last analyzed food nutrition — used for consumption detection
+  Map<String, dynamic>? _lastAnalyzedNutrition;
+  String? _lastAnalyzedProductName;
+  // Challenge history stats
+  ChallengeStats? _challengeStats;
+  Map<String, String> _challengeStartDates = {};
 
   @override
   void initState() {
@@ -240,32 +265,128 @@ class _HomePageState extends State<HomePage> {
     final userName = healthProfile?.name ?? 'there';
     final hour = DateTime.now().hour;
 
+    // Get user's recent activity data
+    final recentHistory = await _firestoreService.getChallengeHistory(7);
+    final moodLogs = await _firestoreService.getRecentMoodLogs(7);
+    final isReturningUser = recentHistory.isNotEmpty || moodLogs.isNotEmpty;
+
     String timeGreeting;
-    String timeTip;
+    String personalizedMessage;
+
     if (hour >= 5 && hour < 12) {
       timeGreeting = 'Good morning';
-      timeTip = 'Great time for a protein-rich breakfast to fuel your day! ☀️';
     } else if (hour >= 12 && hour < 17) {
       timeGreeting = 'Good afternoon';
-      timeTip = 'Keep up your nutrition goals this afternoon! 🌤️';
     } else if (hour >= 17 && hour < 21) {
       timeGreeting = 'Good evening';
-      timeTip =
-          'Evening tip: keep dinner light and nutrient-dense for better sleep. 🌙';
     } else {
       timeGreeting = 'Hey';
-      timeTip =
-          'Late-night tip: if hungry, choose something light and protein-rich. 🌙';
+    }
+
+    // Build personalized message for returning users
+    if (isReturningUser) {
+      String statsMessage = '';
+
+      // Calculate weekly stats
+      if (recentHistory.isNotEmpty) {
+        double totalCalories = 0;
+        double totalProtein = 0;
+        int daysTracked = 0;
+
+        for (var day in recentHistory) {
+          if (day['totals'] != null) {
+            totalCalories += (day['totals']['calories'] ?? 0).toDouble();
+            totalProtein += (day['totals']['protein'] ?? 0).toDouble();
+            daysTracked++;
+          }
+        }
+
+        // Calculate estimated calories burned (rough estimate based on BMR)
+        double estimatedDailyBurn = 2000; // Default
+        if (healthProfile != null) {
+          // Basic BMR calculation (Mifflin-St Jeor)
+          if (healthProfile.gender == 'Male') {
+            estimatedDailyBurn =
+                10 * healthProfile.weight +
+                6.25 * healthProfile.height -
+                5 * healthProfile.age +
+                5;
+          } else {
+            estimatedDailyBurn =
+                10 * healthProfile.weight +
+                6.25 * healthProfile.height -
+                5 * healthProfile.age -
+                161;
+          }
+        }
+
+        double weeklyCalorieBurn = estimatedDailyBurn * 7;
+        double calorieDeficit = weeklyCalorieBurn - totalCalories;
+        double estimatedFatLoss = (calorieDeficit / 7700)
+            .abs(); // 1kg fat ≈ 7700 kcal
+
+        if (daysTracked > 0) {
+          String progressEmoji = calorieDeficit > 0 ? '📉' : '📊';
+
+          statsMessage = '\n\n$progressEmoji *Your Weekly Progress:*\n';
+          statsMessage +=
+              '• Tracked $daysTracked day${daysTracked > 1 ? 's' : ''} this week\n';
+
+          if (calorieDeficit > 0) {
+            statsMessage +=
+                '• Estimated fat loss: ${estimatedFatLoss.toStringAsFixed(2)} kg\n';
+            statsMessage += '• Great job maintaining a calorie deficit! 💪\n';
+          } else if (calorieDeficit < -500) {
+            statsMessage +=
+                '• You\'re in a surplus - perfect for muscle building! 💪\n';
+          } else {
+            statsMessage += '• You\'re maintaining your weight well! ⚖️\n';
+          }
+
+          double avgProtein = totalProtein / daysTracked;
+          statsMessage +=
+              '• Daily avg protein: ${avgProtein.toStringAsFixed(0)}g';
+
+          if (avgProtein >= 100) {
+            statsMessage += ' - Excellent! 🥇';
+          } else if (avgProtein >= 60) {
+            statsMessage += ' - Good! 👍';
+          }
+        }
+      }
+
+      // Add mood insights
+      if (moodLogs.isNotEmpty) {
+        final recentMood = moodLogs.first['mood'];
+        final recentFood = moodLogs.first['foodName'];
+        statsMessage +=
+            '\n\n😊 *Last meal feeling:* $recentMood after $recentFood';
+      }
+
+      personalizedMessage =
+          '$timeGreeting, $userName! 👋 Welcome back to NutriBuddy! 🥗$statsMessage\n\n*Ready to continue your journey?*\n• 📸 Scan your next meal\n• 💬 Ask nutrition questions\n• 🍳 Healthify a recipe\n• 📊 Check detailed stats';
+    } else {
+      // New user message
+      String timeTip;
+      if (hour >= 5 && hour < 12) {
+        timeTip =
+            'Great time for a protein-rich breakfast to fuel your day! ☀️';
+      } else if (hour >= 12 && hour < 17) {
+        timeTip = 'Keep up your nutrition goals this afternoon! 🌤️';
+      } else if (hour >= 17 && hour < 21) {
+        timeTip =
+            'Evening tip: keep dinner light and nutrient-dense for better sleep. 🌙';
+      } else {
+        timeTip =
+            'Late-night tip: if hungry, choose something light and protein-rich. 🌙';
+      }
+
+      personalizedMessage =
+          '$timeGreeting, $userName! 👋 I\'m NutriBuddy, your AI nutrition companion. 🥗\n\n$timeTip\n\n*You can:*\n• 📸 Scan food photos for instant analysis\n• 💬 Ask any nutrition or diet question\n• 🍳 Paste a recipe to healthify it\n• 💳 Check your cheat meal credits';
     }
 
     setState(() {
-      _messages.add(
-        ChatMessage(
-          text:
-              '$timeGreeting, $userName! 👋 I\'m NutriBuddy, your AI nutrition companion. 🥗\n\n$timeTip\n\nYou can:\n• 📸 Scan food photos for instant analysis\n• 💬 Ask any nutrition or diet question\n• 🍳 Paste a recipe to healthify it\n• 💳 Check your cheat meal credits',
-          isUser: false,
-        ),
-      );
+      _messages.add(ChatMessage(text: personalizedMessage, isUser: false));
     });
   }
 
@@ -286,11 +407,11 @@ class _HomePageState extends State<HomePage> {
   };
 
   final Map<String, double> _currentTotals = {
-    'calories': 850,
-    'protein': 45,
-    'carbs': 95,
-    'fat': 28,
-    'sugar': 18,
+    'calories': 0,
+    'protein': 0,
+    'carbs': 0,
+    'fat': 0,
+    'sugar': 0,
   };
 
   Future<void> _pickImage(ImageSource source) async {
@@ -365,8 +486,10 @@ class _HomePageState extends State<HomePage> {
       if (cloudTotals != null) {
         _currentTotals.addAll(cloudTotals);
       }
+      // Load challenge history stats
+      await _loadChallengeStats();
     } catch (e) {
-      print('Error loading data from cloud: $e');
+      debugPrint('Error loading data from cloud: $e');
       // Fallback to local storage
       await _loadSelectedChallenges();
     }
@@ -381,7 +504,7 @@ class _HomePageState extends State<HomePage> {
         _selectedChallenges = savedChallenges;
       });
     } catch (e) {
-      print('Error loading challenges: $e');
+      debugPrint('Error loading challenges: $e');
     }
   }
 
@@ -394,6 +517,15 @@ class _HomePageState extends State<HomePage> {
 
       // Save to Firestore
       await _firestoreService.saveUserChallenges(_selectedChallenges);
+
+      // Record start dates for any newly added challenges (won't overwrite existing)
+      for (final id in _selectedChallenges) {
+        if (!_challengeStartDates.containsKey(id)) {
+          await _firestoreService.saveChallengeStartDate(id);
+        }
+      }
+      // Refresh local start dates cache
+      _challengeStartDates = await _firestoreService.getChallengeStartDates();
 
       // Calculate and save personalized daily goals based on health profile
       final healthProfile = await _firestoreService.getHealthProfile();
@@ -427,7 +559,7 @@ class _HomePageState extends State<HomePage> {
         }
       }
     } catch (e) {
-      print('Error saving challenges: $e');
+      debugPrint('Error saving challenges: $e');
     }
   }
 
@@ -443,6 +575,58 @@ class _HomePageState extends State<HomePage> {
     _scrollToBottom();
 
     final lower = text.toLowerCase();
+
+    // ── Tier-1: Explicit food eaten (works even without a prior scan) ─────────
+    // e.g. "i ate vegetables", "i just had an apple", "i consumed rice"
+    // Guard: skip if message is long (>80 chars) — likely a question, not a log
+    const explicitEatPhrases = [
+      'i just had',
+      'i just ate',
+      'i just consumed',
+      'i ate',
+      'i had',
+      'i consumed',
+      "i'm eating",
+      'eating some',
+      'had some',
+      'ate some',
+    ];
+    if (lower.length <= 80 &&
+        explicitEatPhrases.any((p) => lower.contains(p))) {
+      await _logNamedFood(text);
+      return;
+    }
+
+    // ── Tier-2: Generic confirmation — only meaningful after a food scan ───────
+    // e.g. "yes", "log it", "ate it"
+    // Guard: message must be short (≤30 chars) so "had it, feels good" doesn't trigger this
+    if (_lastAnalyzedNutrition != null && lower.length <= 30) {
+      const confirmPhrases = [
+        'yes',
+        'yep',
+        'yeah',
+        'yup',
+        'sure',
+        'ate it',
+        'had it',
+        'finished it',
+        'i finished',
+        'just finished',
+        'ate that',
+        'had that',
+        'log it',
+        'log this',
+        'add it',
+        'add to my log',
+        'count it',
+        'eating it',
+        'eating now',
+      ];
+      if (confirmPhrases.any((p) => lower.contains(p))) {
+        await _logConsumedMeal();
+        return;
+      }
+    }
 
     // If awaiting a recipe paste, process it
     if (_awaitingRecipe) {
@@ -503,17 +687,29 @@ User Health Profile:
 - Height: ${healthProfile.height.toStringAsFixed(0)} cm
 - Weight: ${healthProfile.weight.toStringAsFixed(1)} kg
 - BMI: ${bmi.toStringAsFixed(1)} (${NutritionCalculator.getBMICategory(bmi)})
-- Blood Group: ${healthProfile.bloodGroup}
 - Calculated Daily Needs: ${calculatedCalories.round()} calories
 
-IMPORTANT: Consider the user's age, gender, and BMI when providing recommendations. Ensure advice is age-appropriate and supports their health status. If any ingredients or nutritional aspects might be relevant to blood group ${healthProfile.bloodGroup} or their BMI category, mention them.
+IMPORTANT: Consider the user's age, gender, and BMI when providing recommendations. Ensure advice is age-appropriate and supports their health status.
 ''';
       }
 
       final imageBytes = await _selectedImage!.readAsBytes();
       final prompt =
           '''
-Analyze this food product image and provide nutritional information in JSON format.
+CRITICAL: First determine if this image contains actual FOOD or FOOD PACKAGING. 
+If the image contains:
+- Non-food items (electronics, screens, furniture, people, animals, etc.)
+- Text/code on screens
+- Empty plates/containers
+- Abstract images or scenes without identifiable food
+
+Return this JSON immediately:
+{
+  "error": "not_food",
+  "message": "This doesn't appear to be food or a food product. Please take a photo of actual food, meal, or food packaging."
+}
+
+ONLY if the image clearly shows ACTUAL FOOD OR FOOD PACKAGING, proceed to analyze it and provide nutritional information in JSON format.
 
 Include:
 1. Product name
@@ -570,10 +766,29 @@ Return ONLY valid JSON with this structure:
         final jsonStr = jsonMatch.group(0)!;
         final result = jsonDecode(jsonStr) as Map<String, dynamic>;
 
+        // Check if it's an error (not food)
+        if (result['error'] == 'not_food') {
+          setState(() {
+            _processingMessage = null;
+            _messages.add(
+              ChatMessage(
+                text:
+                    result['message'] as String? ??
+                    'This doesn\'t appear to be food. Please take a photo of actual food or food packaging.',
+                isUser: false,
+              ),
+            );
+          });
+          _scrollToBottom();
+          return;
+        }
+
         final productName = result['productName'] as String? ?? 'that food';
 
         setState(() {
           _analysisResult = result;
+          _lastAnalyzedNutrition = result['nutrition'] as Map<String, dynamic>?;
+          _lastAnalyzedProductName = result['productName'] as String?;
           _processingMessage = null;
 
           // Add AI response to chat
@@ -607,8 +822,11 @@ Return ONLY valid JSON with this structure:
       setState(() {
         _processingMessage = null;
       });
+      // Show the actual error for debugging
+      final errorMsg = e.toString();
+      debugPrint('Analysis error: $errorMsg');
       _showError(
-        'Analysis failed: $e\n\nNote: Add your Gemini API key to enable real AI analysis.',
+        'Analysis failed: ${errorMsg.length > 100 ? errorMsg.substring(0, 100) + "..." : errorMsg}',
       );
     }
   }
@@ -808,7 +1026,19 @@ Return ONLY valid JSON with this structure:
 
     setState(() {
       _analysisResult = demoData;
+      _lastAnalyzedNutrition = demoData['nutrition'] as Map<String, dynamic>?;
+      _lastAnalyzedProductName = demoData['productName'] as String?;
       _processingMessage = null;
+
+      // Demo mode notice
+      _messages.add(
+        ChatMessage(
+          text:
+              '⚠️ This is a simulated analysis based on your active goal. '
+              'Scan a real food photo with the AI enabled for accurate results.',
+          isUser: false,
+        ),
+      );
 
       _messages.add(
         ChatMessage(
@@ -840,11 +1070,9 @@ Return ONLY valid JSON with this structure:
 
     try {
       await _firestoreService.saveFoodAnalysis(analysis);
-
-      // Update daily totals in cloud
-      await _firestoreService.saveDailyTotals(_currentTotals);
+      // Daily totals are only persisted when the user confirms consumption via _logConsumedMeal()
     } catch (e) {
-      print('Error saving analysis to cloud: $e');
+      debugPrint('Error saving analysis to cloud: $e');
     }
   }
 
@@ -878,7 +1106,7 @@ Return ONLY valid JSON with this structure:
 User Profile:
 - Name: ${profile.name}, Age: ${profile.age}, Gender: ${profile.gender}
 - Height: ${profile.height.toStringAsFixed(0)} cm, Weight: ${profile.weight.toStringAsFixed(1)} kg
-- BMI: ${bmi.toStringAsFixed(1)} ($bmiCat), Blood Group: ${profile.bloodGroup}
+- BMI: ${bmi.toStringAsFixed(1)} ($bmiCat)
 - Active Health Goals: $goals
 
 Today's Intake vs Goals:
@@ -887,6 +1115,13 @@ Today's Intake vs Goals:
 - Carbs:    ${_currentTotals['carbs']?.toInt()}/${_dailyGoals['maxCarbs']?.toInt()} g
 - Fat:      ${_currentTotals['fat']?.toInt()}/${_dailyGoals['maxFat']?.toInt()} g
 - Sugar:    ${_currentTotals['sugar']?.toInt()}/${_dailyGoals['maxSugar']?.toInt()} g
+${_challengeStats != null ? '''
+Challenge History (last ${_challengeStats!.totalDaysTracked} days tracked):
+- Current streak: ${_challengeStats!.streakDays} days
+- Goal hit rate: ${_challengeStats!.goalHitRate}%
+- Avg daily calories: ${_challengeStats!.avgCalories} kcal
+- Avg daily protein: ${_challengeStats!.avgProtein} g
+- Avg daily carbs: ${_challengeStats!.avgCarbs} g''' : ''}
 ''';
   }
 
@@ -907,6 +1142,310 @@ Today's Intake vs Goals:
       return 'Time context: Late night ($hour:00). Discourage heavy meals; suggest light, protein-rich options.';
     }
   }
+
+  // ──────────────────────────────────────────────────────────
+  //  CONSUMPTION DETECTION + CHALLENGE HISTORY
+  // ──────────────────────────────────────────────────────────
+
+  /// Logs the last analyzed meal into today's running totals and persists to Firestore.
+  Future<void> _logConsumedMeal() async {
+    if (_lastAnalyzedNutrition == null) return;
+
+    final nutrition = _lastAnalyzedNutrition!;
+    final foodName = _lastAnalyzedProductName ?? 'that meal';
+
+    setState(() {
+      _currentTotals['calories'] =
+          (_currentTotals['calories'] ?? 0) +
+          (nutrition['calories'] as num? ?? 0).toDouble();
+      _currentTotals['protein'] =
+          (_currentTotals['protein'] ?? 0) +
+          (nutrition['protein'] as num? ?? 0).toDouble();
+      _currentTotals['carbs'] =
+          (_currentTotals['carbs'] ?? 0) +
+          (nutrition['carbs'] as num? ?? 0).toDouble();
+      _currentTotals['fat'] =
+          (_currentTotals['fat'] ?? 0) +
+          (nutrition['fat'] as num? ?? 0).toDouble();
+      _currentTotals['sugar'] =
+          (_currentTotals['sugar'] ?? 0) +
+          (nutrition['sugar'] as num? ?? 0).toDouble();
+    });
+
+    // Persist updated totals and refresh history stats
+    await _firestoreService.saveDailyTotals(_currentTotals);
+    await _loadChallengeStats();
+
+    final calAdded = (nutrition['calories'] as num? ?? 0).toInt();
+    final calLeft =
+        ((_dailyGoals['maxCalories'] ?? 2000) - _currentTotals['calories']!)
+            .toInt();
+    final proLeft =
+        ((_dailyGoals['minProtein'] ?? 120) - _currentTotals['protein']!)
+            .toInt();
+    final streakMsg = (_challengeStats?.streakDays ?? 0) > 1
+        ? '\n\n🔥 ${_challengeStats!.streakDays}-day streak! Keep it up!'
+        : '';
+
+    setState(() {
+      _lastAnalyzedNutrition = null;
+      _lastAnalyzedProductName = null;
+      _messages.add(
+        ChatMessage(
+          text:
+              '✅ Logged $foodName! +$calAdded kcal added.\n\n'
+              '📊 Today so far:\n'
+              '• Calories: ${calLeft > 0 ? '$calLeft kcal remaining' : '⚠️ Over budget by ${calLeft.abs()} kcal'}\n'
+              '• Protein: ${proLeft > 0 ? '$proLeft g to goal' : '✅ Protein goal reached!'}\n'
+              '• Carbs: ${((_dailyGoals['maxCarbs'] ?? 200) - _currentTotals['carbs']!).toInt()} g remaining'
+              '$streakMsg',
+          isUser: false,
+        ),
+      );
+    });
+    _scrollToBottom();
+  }
+
+  /// Parses an explicit "i ate X" message, estimates X's nutrition, and logs it.
+  Future<void> _logNamedFood(String messageText) async {
+    // Strip eating verb phrases to extract just the food name
+    String foodText = messageText.toLowerCase();
+    for (final phrase in [
+      'i just had',
+      'i just ate',
+      'i just consumed',
+      'i ate',
+      'i had',
+      'i consumed',
+      "i'm eating",
+      'eating some',
+      'had some',
+      'ate some',
+    ]) {
+      if (foodText.contains(phrase)) {
+        foodText = foodText.replaceFirst(phrase, '').trim();
+        break;
+      }
+    }
+    // Strip trailing time words
+    foodText = foodText
+        .replaceAll(
+          RegExp(
+            r'\b(now|just now|today|just|right now|for lunch|for dinner|for breakfast)\b',
+          ),
+          '',
+        )
+        .replaceAll(RegExp(r'[^\w\s]'), '')
+        .trim();
+    final foodName = foodText.isEmpty ? 'food' : foodText;
+
+    setState(() {
+      _processingMessage = 'Estimating nutrition for $foodName...';
+    });
+
+    final nutrition = _kDemoMode
+        ? _estimateDemoNutrition(foodName)
+        : await _estimateNutritionWithAI(foodName);
+
+    _lastAnalyzedNutrition = nutrition;
+    _lastAnalyzedProductName = foodName;
+    await _logConsumedMeal();
+  }
+
+  /// Simple keyword-based nutrition estimator for demo mode.
+  Map<String, dynamic> _estimateDemoNutrition(String food) {
+    final f = food.toLowerCase();
+    if (RegExp(
+      r'vegetable|veggie|salad|broccoli|spinach|carrot|kale|cucumber|lettuce|pepper|tomato',
+    ).hasMatch(f)) {
+      return {
+        'calories': 55.0,
+        'protein': 3.0,
+        'carbs': 9.0,
+        'fat': 1.0,
+        'sugar': 4.0,
+      };
+    }
+    if (RegExp(
+      r'fruit|apple|banana|orange|mango|berry|berries|grape|watermelon',
+    ).hasMatch(f)) {
+      return {
+        'calories': 80.0,
+        'protein': 1.0,
+        'carbs': 20.0,
+        'fat': 0.0,
+        'sugar': 15.0,
+      };
+    }
+    if (RegExp(
+      r'chicken|turkey|fish|salmon|tuna|shrimp|prawn|meat|beef|pork|lamb|egg|eggs',
+    ).hasMatch(f)) {
+      return {
+        'calories': 210.0,
+        'protein': 30.0,
+        'carbs': 1.0,
+        'fat': 9.0,
+        'sugar': 0.0,
+      };
+    }
+    if (RegExp(
+      r'rice|pasta|noodle|bread|roti|chapati|oat|oatmeal|quinoa|cereal',
+    ).hasMatch(f)) {
+      return {
+        'calories': 220.0,
+        'protein': 5.0,
+        'carbs': 44.0,
+        'fat': 2.0,
+        'sugar': 1.0,
+      };
+    }
+    if (RegExp(r'dal|lentil|bean|chickpea|tofu|paneer').hasMatch(f)) {
+      return {
+        'calories': 180.0,
+        'protein': 12.0,
+        'carbs': 22.0,
+        'fat': 4.0,
+        'sugar': 2.0,
+      };
+    }
+    if (RegExp(r'milk|yogurt|curd|cheese|dairy').hasMatch(f)) {
+      return {
+        'calories': 120.0,
+        'protein': 8.0,
+        'carbs': 12.0,
+        'fat': 5.0,
+        'sugar': 10.0,
+      };
+    }
+    if (RegExp(r'juice|smoothie|shake|drink').hasMatch(f)) {
+      return {
+        'calories': 130.0,
+        'protein': 2.0,
+        'carbs': 30.0,
+        'fat': 0.0,
+        'sugar': 25.0,
+      };
+    }
+    // Default generic meal estimate
+    return {
+      'calories': 300.0,
+      'protein': 12.0,
+      'carbs': 35.0,
+      'fat': 10.0,
+      'sugar': 6.0,
+    };
+  }
+
+  /// Uses Gemini to estimate nutrition for a named food (real mode).
+  Future<Map<String, dynamic>> _estimateNutritionWithAI(String food) async {
+    try {
+      final model = GenerativeModel(
+        model: 'gemini-1.5-flash',
+        apiKey: _kGeminiApiKey,
+      );
+      final response = await model.generateContent([
+        Content.text(
+          'Estimate the nutrition for a typical single serving of "$food". '
+          'Return ONLY valid JSON with keys: calories, protein, carbs, fat, sugar (all numbers in grams except calories). '
+          'Example: {"calories":200,"protein":8,"carbs":30,"fat":5,"sugar":3}',
+        ),
+      ]);
+      final text = response.text ?? '';
+      final jsonMatch = RegExp(r'\{[\s\S]*?\}').firstMatch(text);
+      if (jsonMatch != null) {
+        final raw = jsonDecode(jsonMatch.group(0)!) as Map<String, dynamic>;
+        return raw.map((k, v) => MapEntry(k, (v as num).toDouble()));
+      }
+    } catch (_) {}
+    // Fallback
+    return {
+      'calories': 250.0,
+      'protein': 10.0,
+      'carbs': 30.0,
+      'fat': 8.0,
+      'sugar': 5.0,
+    };
+  }
+
+  /// Loads challenge history from Firestore and computes ChallengeStats.
+  Future<void> _loadChallengeStats() async {
+    try {
+      final startDates = await _firestoreService.getChallengeStartDates();
+      final history = await _firestoreService.getChallengeHistory(90);
+
+      if (history.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _challengeStartDates = startDates;
+            _challengeStats = null;
+          });
+        }
+        return;
+      }
+
+      // Build set of tracked date keys
+      final trackedDates = history
+          .map((d) {
+            final key = d['dateKey'] as String?;
+            return (key != null && key.isNotEmpty)
+                ? key
+                : (d['date'] as String? ?? '');
+          })
+          .where((k) => k.isNotEmpty)
+          .toSet();
+
+      // Compute streak (consecutive days from today backwards)
+      int streak = 0;
+      DateTime cursor = DateTime.now();
+      while (true) {
+        final key = _dateKey(cursor);
+        if (trackedDates.contains(key)) {
+          streak++;
+          cursor = cursor.subtract(const Duration(days: 1));
+        } else {
+          break;
+        }
+      }
+
+      // Rolling averages and goal-hit rate
+      double totalCal = 0, totalPro = 0, totalCarbs = 0;
+      int hitCount = 0;
+      for (final day in history) {
+        final totals = day['totals'] as Map<String, dynamic>? ?? {};
+        totalCal += (totals['calories'] as num? ?? 0).toDouble();
+        totalPro += (totals['protein'] as num? ?? 0).toDouble();
+        totalCarbs += (totals['carbs'] as num? ?? 0).toDouble();
+        // "Goal hit" = within calorie budget AND ≥80% of protein target
+        final cal = (totals['calories'] as num? ?? 0).toDouble();
+        final pro = (totals['protein'] as num? ?? 0).toDouble();
+        if (cal <= (_dailyGoals['maxCalories'] ?? 2000) &&
+            pro >= (_dailyGoals['minProtein'] ?? 120) * 0.8) {
+          hitCount++;
+        }
+      }
+
+      final n = history.length;
+      if (mounted) {
+        setState(() {
+          _challengeStartDates = startDates;
+          _challengeStats = ChallengeStats(
+            streakDays: streak,
+            totalDaysTracked: n,
+            avgCalories: n > 0 ? (totalCal / n).round() : 0,
+            avgProtein: n > 0 ? (totalPro / n).round() : 0,
+            avgCarbs: n > 0 ? (totalCarbs / n).round() : 0,
+            goalHitRate: n > 0 ? ((hitCount / n) * 100).round() : 0,
+          );
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading challenge stats: $e');
+    }
+  }
+
+  /// Returns a date key string (yyyy-MM-dd) for a given DateTime.
+  String _dateKey(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
   /// Main conversational AI handler for text questions.
   Future<void> _processTextQuery(String text) async {
@@ -1244,7 +1783,7 @@ Keep the tone warm and practical.
       });
       _scrollToBottom();
     } catch (e) {
-      print('Error saving mood: $e');
+      debugPrint('Error saving mood: $e');
     }
   }
 
@@ -1378,7 +1917,7 @@ Keep the tone warm and practical.
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -1523,14 +2062,15 @@ Keep the tone warm and practical.
                             vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.primaryContainer.withOpacity(0.5),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primaryContainer
+                                .withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                               color: Theme.of(
                                 context,
-                              ).colorScheme.primary.withOpacity(0.3),
+                              ).colorScheme.primary.withValues(alpha: 0.3),
                             ),
                           ),
                           child: Text(
@@ -1552,9 +2092,11 @@ Keep the tone warm and practical.
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.12),
+                      color: Colors.green.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                      border: Border.all(
+                        color: Colors.green.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1590,7 +2132,7 @@ Keep the tone warm and practical.
                     }(),
                     backgroundColor: Theme.of(
                       context,
-                    ).colorScheme.primary.withOpacity(0.15),
+                    ).colorScheme.primary.withValues(alpha: 0.15),
                     color: Colors.amber,
                     minHeight: 6,
                     borderRadius: BorderRadius.circular(4),
@@ -1609,7 +2151,7 @@ Keep the tone warm and practical.
                                     context,
                                   ).colorScheme.onPrimaryContainer
                                 : Theme.of(context).colorScheme.onSurface)
-                            .withOpacity(0.6),
+                            .withValues(alpha: 0.6),
                   ),
                 ),
               ],
@@ -1690,7 +2232,7 @@ Keep the tone warm and practical.
             decoration: BoxDecoration(
               color: _getRecommendationColor(
                 result['recommendation'],
-              ).withOpacity(0.1),
+              ).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
@@ -1723,7 +2265,9 @@ Keep the tone warm and practical.
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+        color: Theme.of(
+          context,
+        ).colorScheme.primaryContainer.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
@@ -1755,6 +2299,18 @@ Keep the tone warm and practical.
   }
 
   Widget _buildDailySummaryCard() {
+    // Compute day-of-challenge for the primary active goal
+    int? dayOfChallenge;
+    if (_selectedChallenges.isNotEmpty) {
+      final startStr = _challengeStartDates[_selectedChallenges.first];
+      if (startStr != null) {
+        final start = DateTime.tryParse(startStr);
+        if (start != null) {
+          dayOfChallenge = DateTime.now().difference(start).inDays + 1;
+        }
+      }
+    }
+
     return Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1769,14 +2325,53 @@ Keep the tone warm and practical.
                 size: 20,
               ),
               const SizedBox(width: 8),
-              Text(
-                'Today\'s Progress',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  'Today\'s Progress${dayOfChallenge != null ? ' · Day $dayOfChallenge' : ''}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
+              if (_challengeStats != null && _challengeStats!.streakDays > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.orange.withValues(alpha: 0.4),
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    '🔥 ${_challengeStats!.streakDays}d streak',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange,
+                    ),
+                  ),
+                ),
             ],
           ),
+          if (_challengeStats != null && _challengeStats!.totalDaysTracked > 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 2),
+              child: Text(
+                '${_challengeStats!.totalDaysTracked} days tracked · '
+                '${_challengeStats!.goalHitRate}% goal hit rate · '
+                'avg ${_challengeStats!.avgCalories} kcal/day',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
+            ),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1836,7 +2431,9 @@ Keep the tone warm and practical.
             Icon(
               Icons.emoji_events_outlined,
               size: 16,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.5),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -1845,7 +2442,7 @@ Keep the tone warm and practical.
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(
                     context,
-                  ).colorScheme.onSurface.withOpacity(0.5),
+                  ).colorScheme.onSurface.withValues(alpha: 0.5),
                 ),
               ),
             ),
@@ -1893,9 +2490,9 @@ Keep the tone warm and practical.
                   challenge.name,
                   style: const TextStyle(fontSize: 12),
                 ),
-                backgroundColor: challenge.color.withOpacity(0.15),
+                backgroundColor: challenge.color.withValues(alpha: 0.15),
                 side: BorderSide(
-                  color: challenge.color.withOpacity(0.3),
+                  color: challenge.color.withValues(alpha: 0.3),
                   width: 1,
                 ),
                 deleteIcon: Icon(Icons.close, size: 16, color: challenge.color),
@@ -1967,7 +2564,7 @@ Keep the tone warm and practical.
               child: CircularProgressIndicator(
                 value: progress,
                 strokeWidth: 3,
-                backgroundColor: color.withOpacity(0.2),
+                backgroundColor: color.withValues(alpha: 0.2),
                 color: color,
               ),
             ),

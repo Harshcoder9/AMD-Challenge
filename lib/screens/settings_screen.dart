@@ -219,7 +219,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           );
         }
       } catch (e) {
-        print('Delete account error: $e');
+        debugPrint('Delete account error: $e');
         if (mounted) {
           setState(() {
             _isLoading = false;
@@ -301,7 +301,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Text(
                             user!.email!,
                             style: theme.textTheme.bodyMedium?.copyWith(
-                              color: colorScheme.onSurface.withOpacity(0.6),
+                              color: colorScheme.onSurface.withValues(alpha: 0.6),
                             ),
                           ),
                         ],
@@ -390,18 +390,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     '${_healthProfile!.weight.toStringAsFixed(1)} kg',
                                     Icons.monitor_weight,
                                   ),
-                                  const SizedBox(height: 8),
-                                  _buildInfoRow(
-                                    'Blood Group',
-                                    _healthProfile!.bloodGroup,
-                                    Icons.bloodtype,
-                                  ),
                                   const SizedBox(height: 12),
                                   Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
                                       color: colorScheme.primaryContainer
-                                          .withOpacity(0.3),
+                                          .withValues(alpha: 0.3),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Row(
@@ -558,3 +552,5 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
+
+

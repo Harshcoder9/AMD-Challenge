@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import 'health_profile_screen.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -74,19 +75,17 @@ class _SignInScreenState extends State<SignInScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const SizedBox(height: 20),
+
               // App Logo/Icon
-              Icon(
-                Icons.restaurant_menu,
-                size: 100,
-                color: colorScheme.primary,
-              ),
-              const SizedBox(height: 24),
+              Icon(Icons.restaurant_menu, size: 80, color: colorScheme.primary),
+              const SizedBox(height: 16),
 
               // App Name
               Text(
@@ -97,17 +96,17 @@ class _SignInScreenState extends State<SignInScreen> {
                   color: colorScheme.primary,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
               // Tagline
               Text(
                 'Your AI-powered nutrition companion',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  color: colorScheme.onSurface.withOpacity(0.7),
+                  color: colorScheme.onSurface.withValues(alpha: 0.7),
                 ),
               ),
-              const SizedBox(height: 48),
+              const SizedBox(height: 32),
 
               // Features List
               _buildFeatureItem(
@@ -115,36 +114,84 @@ class _SignInScreenState extends State<SignInScreen> {
                 'Scan food products instantly',
                 colorScheme,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _buildFeatureItem(
                 Icons.analytics,
                 'Get AI-powered nutrition analysis',
                 colorScheme,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _buildFeatureItem(
                 Icons.emoji_events,
                 'Track your health goals',
                 colorScheme,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _buildFeatureItem(
                 Icons.cloud_sync,
                 'Sync across all your devices',
                 colorScheme,
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 32),
 
-              // Sign In / Sign Up Label
+              // Create Account Button
+              SizedBox(
+                height: 56,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            const HealthProfileScreen(showBackButton: true),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.person_add, size: 24),
+                  label: const Text(
+                    'Create Account',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: colorScheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Divider with OR
+              Row(
+                children: [
+                  Expanded(child: Divider(color: colorScheme.outline)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      'OR',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurface.withValues(alpha: 0.5),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Expanded(child: Divider(color: colorScheme.outline)),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Sign In Label
               Text(
-                'Sign in or create account',
+                'Already have an account?',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: colorScheme.onSurface,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               // Google Sign In Button
               SizedBox(
@@ -184,18 +231,18 @@ class _SignInScreenState extends State<SignInScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
               // Helper text
               Text(
-                'Works for both new and existing accounts',
+                'Sign in with your existing Google account',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurface.withOpacity(0.6),
+                  color: colorScheme.onSurface.withValues(alpha: 0.6),
                   fontSize: 12,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               // Divider with OR
               Row(
@@ -206,7 +253,7 @@ class _SignInScreenState extends State<SignInScreen> {
                     child: Text(
                       'OR',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurface.withOpacity(0.5),
+                        color: colorScheme.onSurface.withValues(alpha: 0.5),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -214,7 +261,7 @@ class _SignInScreenState extends State<SignInScreen> {
                   Expanded(child: Divider(color: colorScheme.outline)),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               // Anonymous Sign In Button
               SizedBox(
@@ -245,7 +292,7 @@ class _SignInScreenState extends State<SignInScreen> {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: colorScheme.primary,
                     side: BorderSide(
-                      color: colorScheme.outline.withOpacity(0.5),
+                      color: colorScheme.outline.withValues(alpha: 0.5),
                       width: 1.5,
                     ),
                     shape: RoundedRectangleBorder(
@@ -254,27 +301,28 @@ class _SignInScreenState extends State<SignInScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
 
               // Guest mode explanation
               Text(
                 'No account needed • Upgrade to save data anytime',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurface.withOpacity(0.5),
+                  color: colorScheme.onSurface.withValues(alpha: 0.5),
                   fontSize: 11,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
               // Privacy Notice
               Text(
                 'By continuing, you agree to our Terms of Service and Privacy Policy',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurface.withOpacity(0.5),
+                  color: colorScheme.onSurface.withValues(alpha: 0.5),
                 ),
               ),
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -303,7 +351,7 @@ class _SignInScreenState extends State<SignInScreen> {
             text,
             style: TextStyle(
               fontSize: 15,
-              color: colorScheme.onSurface.withOpacity(0.8),
+              color: colorScheme.onSurface.withValues(alpha: 0.8),
             ),
           ),
         ),

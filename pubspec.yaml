@@ -48,13 +48,13 @@ dependencies:
   shared_preferences: ^2.2.2
 
   # Firebase core
-  firebase_core: ^2.24.2
+  firebase_core: ^3.6.0
 
   # Firebase authentication
-  firebase_auth: ^4.16.0
+  firebase_auth: ^5.3.0
 
   # Cloud Firestore for data storage
-  cloud_firestore: ^4.14.0
+  cloud_firestore: ^5.4.0
 
   # Google Sign-In
   google_sign_in: ^6.2.1

@@ -1,14 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 // Health Profile Model
 class HealthProfile {
   final String name;
   final int age;
-  final String gender; // Male, Female, Other
+  final String gender; 
   final double height; // in cm
   final double weight; // in kg
-  final String bloodGroup; // A+, A-, B+, B-, AB+, AB-, O+, O-
   final List<String>? allergies; // Optional, for future use
 
   HealthProfile({
@@ -17,7 +17,6 @@ class HealthProfile {
     required this.gender,
     required this.height,
     required this.weight,
-    required this.bloodGroup,
     this.allergies,
   });
 
@@ -29,7 +28,6 @@ class HealthProfile {
       'gender': gender,
       'height': height,
       'weight': weight,
-      'bloodGroup': bloodGroup,
       'allergies': allergies ?? [],
       'updatedAt': FieldValue.serverTimestamp(),
     };
@@ -43,7 +41,6 @@ class HealthProfile {
       gender: map['gender'] ?? 'Other',
       height: (map['height'] ?? 0).toDouble(),
       weight: (map['weight'] ?? 0).toDouble(),
-      bloodGroup: map['bloodGroup'] ?? 'O+',
       allergies: map['allergies'] != null
           ? List<String>.from(map['allergies'])
           : null,
@@ -67,7 +64,7 @@ class FirestoreService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error saving challenges: $e');
+      debugPrint('Error saving challenges: $e');
       rethrow;
     }
   }
@@ -83,7 +80,7 @@ class FirestoreService {
       }
       return [];
     } catch (e) {
-      print('Error getting challenges: $e');
+      debugPrint('Error getting challenges: $e');
       return [];
     }
   }
@@ -98,7 +95,7 @@ class FirestoreService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error saving daily goals: $e');
+      debugPrint('Error saving daily goals: $e');
       rethrow;
     }
   }
@@ -114,7 +111,7 @@ class FirestoreService {
       }
       return null;
     } catch (e) {
-      print('Error getting daily goals: $e');
+      debugPrint('Error getting daily goals: $e');
       return null;
     }
   }
@@ -139,7 +136,7 @@ class FirestoreService {
             'timestamp': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
     } catch (e) {
-      print('Error saving daily totals: $e');
+      debugPrint('Error saving daily totals: $e');
       rethrow;
     }
   }
@@ -165,7 +162,7 @@ class FirestoreService {
       }
       return null;
     } catch (e) {
-      print('Error getting daily totals: $e');
+      debugPrint('Error getting daily totals: $e');
       return null;
     }
   }
@@ -181,7 +178,7 @@ class FirestoreService {
           .collection('food_history')
           .add({...analysis, 'timestamp': FieldValue.serverTimestamp()});
     } catch (e) {
-      print('Error saving food analysis: $e');
+      debugPrint('Error saving food analysis: $e');
       rethrow;
     }
   }
@@ -221,7 +218,7 @@ class FirestoreService {
         await saveDailyTotals(currentTotals);
       }
     } catch (e) {
-      print('Error initializing user profile: $e');
+      debugPrint('Error initializing user profile: $e');
       rethrow;
     }
   }
@@ -248,7 +245,7 @@ class FirestoreService {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
-      print('Error saving health profile: $e');
+      debugPrint('Error saving health profile: $e');
       rethrow;
     }
   }
@@ -264,7 +261,7 @@ class FirestoreService {
       }
       return null;
     } catch (e) {
-      print('Error getting health profile: $e');
+      debugPrint('Error getting health profile: $e');
       return null;
     }
   }
@@ -277,7 +274,7 @@ class FirestoreService {
       final doc = await _firestore.collection('users').doc(_userId).get();
       return doc.exists && doc.data()?['healthProfile'] != null;
     } catch (e) {
-      print('Error checking health profile: $e');
+      debugPrint('Error checking health profile: $e');
       return false;
     }
   }
@@ -303,7 +300,7 @@ class FirestoreService {
             'timestamp': FieldValue.serverTimestamp(),
           });
     } catch (e) {
-      print('Error saving mood log: $e');
+      debugPrint('Error saving mood log: $e');
     }
   }
 
@@ -323,8 +320,56 @@ class FirestoreService {
 
       return snapshot.docs.map((d) => d.data()).toList();
     } catch (e) {
-      print('Error getting mood logs: $e');
+      debugPrint('Error getting mood logs: $e');
+      return [];
+    }
+  }
+
+  // Save a challenge start date (uses merge so existing dates are never overwritten)
+  Future<void> saveChallengeStartDate(String challengeId) async {
+    if (_userId == null) return;
+    try {
+      await _firestore.collection('users').doc(_userId).set({
+        'challengeStartDates': {challengeId: DateTime.now().toIso8601String()},
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error saving challenge start date: $e');
+    }
+  }
+
+  // Get all challenge start dates (challengeId → ISO date string)
+  Future<Map<String, String>> getChallengeStartDates() async {
+    if (_userId == null) return {};
+    try {
+      final doc = await _firestore.collection('users').doc(_userId).get();
+      if (doc.exists && doc.data()?['challengeStartDates'] != null) {
+        return Map<String, String>.from(doc.data()!['challengeStartDates']);
+      }
+      return {};
+    } catch (e) {
+      debugPrint('Error getting challenge start dates: $e');
+      return {};
+    }
+  }
+
+  // Get daily nutrition history for last N days (newest first)
+  Future<List<Map<String, dynamic>>> getChallengeHistory(int days) async {
+    if (_userId == null) return [];
+    try {
+      final cutoff = DateTime.now().subtract(Duration(days: days));
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(_userId)
+          .collection('daily_nutrition')
+          .where('timestamp', isGreaterThan: Timestamp.fromDate(cutoff))
+          .orderBy('timestamp', descending: true)
+          .get();
+      return snapshot.docs.map((d) => {...d.data(), 'dateKey': d.id}).toList();
+    } catch (e) {
+      debugPrint('Error getting challenge history: $e');
       return [];
     }
   }
 }
+
+

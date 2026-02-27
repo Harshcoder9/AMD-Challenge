@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/firestore_service.dart';
 import '../main.dart';
+import 'sign_in_screen.dart';
 
 class HealthProfileScreen extends StatefulWidget {
   final bool isEditing;
   final HealthProfile? existingProfile;
+  final bool showBackButton;
 
   const HealthProfileScreen({
     super.key,
     this.isEditing = false,
     this.existingProfile,
+    this.showBackButton = false,
   });
 
   @override
@@ -28,21 +31,10 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
   final _weightController = TextEditingController();
 
   String _selectedGender = 'Male';
-  String _selectedBloodGroup = 'O+';
 
   bool _isLoading = false;
 
   final List<String> _genderOptions = ['Male', 'Female', 'Other'];
-  final List<String> _bloodGroupOptions = [
-    'A+',
-    'A-',
-    'B+',
-    'B-',
-    'AB+',
-    'AB-',
-    'O+',
-    'O-'
-  ];
 
   @override
   void initState() {
@@ -59,7 +51,6 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
     _heightController.text = profile.height.toString();
     _weightController.text = profile.weight.toString();
     _selectedGender = profile.gender;
-    _selectedBloodGroup = profile.bloodGroup;
   }
 
   @override
@@ -85,7 +76,6 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
         gender: _selectedGender,
         height: double.parse(_heightController.text),
         weight: double.parse(_weightController.text),
-        bloodGroup: _selectedBloodGroup,
       );
 
       await _firestoreService.saveHealthProfile(profile);
@@ -102,9 +92,9 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving profile: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error saving profile: $e')));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -120,8 +110,10 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
     return Scaffold(
       backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        title: Text(widget.isEditing ? 'Edit Profile' : 'Complete Your Profile'),
-        automaticallyImplyLeading: widget.isEditing,
+        title: Text(
+          widget.isEditing ? 'Edit Profile' : 'Complete Your Profile',
+        ),
+        automaticallyImplyLeading: widget.isEditing || widget.showBackButton,
         backgroundColor: const Color(0xFF1565C0),
         elevation: 0,
       ),
@@ -145,11 +137,7 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
               ),
               child: Column(
                 children: [
-                  Icon(
-                    Icons.person_add,
-                    size: 64,
-                    color: Colors.white,
-                  ),
+                  Icon(Icons.person_add, size: 64, color: Colors.white),
                   const SizedBox(height: 16),
                   Text(
                     widget.isEditing
@@ -165,7 +153,7 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                   Text(
                     'This helps us provide personalized nutrition recommendations',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -237,10 +225,13 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                             label: 'Height',
                             hint: '170',
                             icon: Icons.height,
-                            keyboardType: TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
-                                  RegExp(r'^\d+\.?\d{0,1}')),
+                                RegExp(r'^\d+\.?\d{0,1}'),
+                              ),
                             ],
                             suffixText: 'cm',
                             validator: (value) {
@@ -248,7 +239,9 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                                 return 'Required';
                               }
                               final height = double.tryParse(value);
-                              if (height == null || height < 100 || height > 250) {
+                              if (height == null ||
+                                  height < 100 ||
+                                  height > 250) {
                                 return 'Invalid';
                               }
                               return null;
@@ -262,10 +255,13 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                             label: 'Weight',
                             hint: '65',
                             icon: Icons.monitor_weight,
-                            keyboardType: TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
-                                  RegExp(r'^\d+\.?\d{0,1}')),
+                                RegExp(r'^\d+\.?\d{0,1}'),
+                              ),
                             ],
                             suffixText: 'kg',
                             validator: (value) {
@@ -273,7 +269,9 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                                 return 'Required';
                               }
                               final weight = double.tryParse(value);
-                              if (weight == null || weight < 30 || weight > 300) {
+                              if (weight == null ||
+                                  weight < 30 ||
+                                  weight > 300) {
                                 return 'Invalid';
                               }
                               return null;
@@ -282,13 +280,6 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                         ),
                       ],
                     ),
-
-                    const SizedBox(height: 24),
-
-                    // Blood Group
-                    _buildSectionTitle('Blood Group', Icons.bloodtype),
-                    const SizedBox(height: 12),
-                    _buildBloodGroupSelector(),
 
                     const SizedBox(height: 32),
 
@@ -321,7 +312,9 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                                   const Icon(Icons.check_circle, size: 24),
                                   const SizedBox(width: 8),
                                   Text(
-                                    widget.isEditing ? 'Update Profile' : 'Complete Setup',
+                                    widget.isEditing
+                                        ? 'Update Profile'
+                                        : 'Complete Setup',
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.bold,
@@ -331,6 +324,43 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                               ),
                       ),
                     ),
+                    const SizedBox(height: 16),
+
+                    // Already have an account link (only show when creating new account)
+                    if (!widget.isEditing && widget.showBackButton)
+                      Center(
+                        child: TextButton(
+                          onPressed: () {
+                            Navigator.of(context).pushReplacement(
+                              MaterialPageRoute(
+                                builder: (context) => const SignInScreen(),
+                              ),
+                            );
+                          },
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Already have an account? ',
+                                style: TextStyle(
+                                  color: colorScheme.onSurface.withValues(
+                                    alpha: 0.7,
+                                  ),
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                'Sign In',
+                                style: TextStyle(
+                                  color: const Color(0xFF1565C0),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 24),
                   ],
                 ),
@@ -379,9 +409,7 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
         hintText: hint,
         prefixIcon: Icon(icon, color: const Color(0xFF1565C0)),
         suffixText: suffixText,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -399,7 +427,9 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
+        ),
       ),
       child: Row(
         children: _genderOptions.map((gender) {
@@ -411,7 +441,9 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF1565C0) : Colors.transparent,
+                  color: isSelected
+                      ? const Color(0xFF1565C0)
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Column(
@@ -420,8 +452,8 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                       gender == 'Male'
                           ? Icons.male
                           : gender == 'Female'
-                              ? Icons.female
-                              : Icons.transgender,
+                          ? Icons.female
+                          : Icons.transgender,
                       color: isSelected ? Colors.white : Colors.grey,
                       size: 32,
                     ),
@@ -429,55 +461,15 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
                     Text(
                       gender,
                       style: TextStyle(
-                        color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface,
-                        fontWeight:
-                            isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected
+                            ? Colors.white
+                            : Theme.of(context).colorScheme.onSurface,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                       ),
                     ),
                   ],
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildBloodGroupSelector() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: _bloodGroupOptions.map((bloodGroup) {
-          final isSelected = _selectedBloodGroup == bloodGroup;
-          return InkWell(
-            onTap: () => setState(() => _selectedBloodGroup = bloodGroup),
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              width: 70,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFF1565C0) : Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isSelected ? const Color(0xFF1565C0) : Theme.of(context).colorScheme.outline.withOpacity(0.3),
-                  width: isSelected ? 2 : 1,
-                ),
-              ),
-              child: Text(
-                bloodGroup,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  fontSize: 16,
                 ),
               ),
             ),

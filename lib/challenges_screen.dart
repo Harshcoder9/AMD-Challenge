@@ -42,7 +42,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20),
-            color: colorScheme.primaryContainer.withOpacity(0.3),
+            color: colorScheme.primaryContainer.withValues(alpha: 0.3),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -56,7 +56,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                 Text(
                   'Choose one or more goals to help me provide personalized nutrition advice tailored to your needs.',
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurface.withOpacity(0.7),
+                    color: colorScheme.onSurface.withValues(alpha: 0.7),
                   ),
                 ),
               ],
@@ -84,15 +84,15 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                     duration: const Duration(milliseconds: 200),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? challenge.color.withOpacity(0.15)
-                          : colorScheme.surfaceContainerHighest.withOpacity(
+                          ? challenge.color.withValues(alpha: 0.15)
+                          : colorScheme.surfaceContainerHighest.withValues(alpha: 
                               0.5,
                             ),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: isSelected
                             ? challenge.color
-                            : colorScheme.outline.withOpacity(0.3),
+                            : colorScheme.outline.withValues(alpha: 0.3),
                         width: isSelected ? 2.5 : 1,
                       ),
                     ),
@@ -109,7 +109,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                                 width: 50,
                                 height: 50,
                                 decoration: BoxDecoration(
-                                  color: challenge.color.withOpacity(0.2),
+                                  color: challenge.color.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Center(
@@ -126,7 +126,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                                 style: theme.textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: isSelected
-                                      ? challenge.color.withOpacity(0.9)
+                                      ? challenge.color.withValues(alpha: 0.9)
                                       : colorScheme.onSurface,
                                 ),
                               ),
@@ -136,7 +136,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                                 child: Text(
                                   challenge.description,
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurface.withOpacity(
+                                    color: colorScheme.onSurface.withValues(alpha: 
                                       0.6,
                                     ),
                                     height: 1.3,
@@ -182,7 +182,7 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
               color: colorScheme.surface,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, -2),
                 ),
@@ -230,3 +230,5 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
     );
   }
 }
+
+

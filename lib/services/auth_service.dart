@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -47,7 +48,7 @@ class AuthService {
 
       return userCredential;
     } catch (e) {
-      print('Error signing in with Google: $e');
+      debugPrint('Error signing in with Google: $e');
       rethrow;
     }
   }
@@ -64,7 +65,7 @@ class AuthService {
 
       return userCredential;
     } catch (e) {
-      print('Error signing in anonymously: $e');
+      debugPrint('Error signing in anonymously: $e');
       rethrow;
     }
   }
@@ -74,7 +75,7 @@ class AuthService {
     try {
       await Future.wait([_auth.signOut(), _googleSignIn.signOut()]);
     } catch (e) {
-      print('Error signing out: $e');
+      debugPrint('Error signing out: $e');
       rethrow;
     }
   }
@@ -145,7 +146,7 @@ class AuthService {
 
       return userCredential;
     } catch (e) {
-      print('Error upgrading anonymous account: $e');
+      debugPrint('Error upgrading anonymous account: $e');
       rethrow;
     }
   }
@@ -158,13 +159,13 @@ class AuthService {
         throw Exception('No user logged in');
       }
 
-      print('Starting account deletion for user: ${user.uid}');
-      print('User email: ${user.email}');
-      print('User is anonymous: ${user.isAnonymous}');
+      debugPrint('Starting account deletion for user: ${user.uid}');
+      debugPrint('User email: ${user.email}');
+      debugPrint('User is anonymous: ${user.isAnonymous}');
 
       // Delete user data from Firestore first (with error tolerance)
       try {
-        print('Deleting Firestore data...');
+        debugPrint('Deleting Firestore data...');
 
         // Try to delete challenges
         try {
@@ -177,9 +178,9 @@ class AuthService {
           for (var doc in challengesSnapshot.docs) {
             await doc.reference.delete();
           }
-          print('Deleted ${challengesSnapshot.docs.length} challenges');
+          debugPrint('Deleted ${challengesSnapshot.docs.length} challenges');
         } catch (e) {
-          print('Error deleting challenges: $e - continuing...');
+          debugPrint('Error deleting challenges: $e - continuing...');
         }
 
         // Try to delete food history
@@ -193,9 +194,9 @@ class AuthService {
           for (var doc in foodHistorySnapshot.docs) {
             await doc.reference.delete();
           }
-          print('Deleted ${foodHistorySnapshot.docs.length} food items');
+          debugPrint('Deleted ${foodHistorySnapshot.docs.length} food items');
         } catch (e) {
-          print('Error deleting food history: $e - continuing...');
+          debugPrint('Error deleting food history: $e - continuing...');
         }
 
         // Delete daily totals
@@ -209,31 +210,31 @@ class AuthService {
           for (var doc in dailyTotalsSnapshot.docs) {
             await doc.reference.delete();
           }
-          print('Deleted ${dailyTotalsSnapshot.docs.length} daily totals');
+          debugPrint('Deleted ${dailyTotalsSnapshot.docs.length} daily totals');
         } catch (e) {
-          print('Error deleting daily totals: $e - continuing...');
+          debugPrint('Error deleting daily totals: $e - continuing...');
         }
 
         // Delete main user document
         try {
           await _firestore.collection('users').doc(user.uid).delete();
-          print('Deleted user document');
+          debugPrint('Deleted user document');
         } catch (e) {
-          print('Error deleting user document: $e - continuing...');
+          debugPrint('Error deleting user document: $e - continuing...');
         }
       } catch (e) {
-        print(
+        debugPrint(
           'Firestore deletion error: $e - continuing to delete auth account...',
         );
       }
 
       // Delete Firebase auth account
-      print('Deleting Firebase auth account...');
+      debugPrint('Deleting Firebase auth account...');
       try {
         await user.delete();
-        print('Auth account deleted successfully');
+        debugPrint('Auth account deleted successfully');
       } catch (e) {
-        print('Auth deletion error: $e');
+        debugPrint('Auth deletion error: $e');
         // Check if it's a requires-recent-login error
         if (e.toString().contains('requires-recent-login')) {
           // Sign out the user so they can sign in fresh and try again
@@ -249,13 +250,15 @@ class AuthService {
       try {
         await _googleSignIn.signOut();
       } catch (e) {
-        print('Error signing out of Google: $e');
+        debugPrint('Error signing out of Google: $e');
       }
 
-      print('Account deletion completed successfully');
+      debugPrint('Account deletion completed successfully');
     } catch (e) {
-      print('Error deleting account: $e');
+      debugPrint('Error deleting account: $e');
       rethrow;
     }
   }
 }
+
+
