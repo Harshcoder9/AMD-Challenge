@@ -59,6 +59,9 @@ dependencies:
   # Google Sign-In
   google_sign_in: ^6.2.1
 
+  # Markdown rendering for AI responses
+  flutter_markdown: ^0.7.7
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

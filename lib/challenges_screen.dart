@@ -4,7 +4,14 @@ import 'main.dart';
 class ChallengesScreen extends StatefulWidget {
   final List<String> initialSelected;
 
-  const ChallengesScreen({super.key, required this.initialSelected});
+  /// Called with the new selection whenever it changes (used when embedded as a tab).
+  final void Function(List<String>)? onChanged;
+
+  const ChallengesScreen({
+    super.key,
+    required this.initialSelected,
+    this.onChanged,
+  });
 
   @override
   State<ChallengesScreen> createState() => _ChallengesScreenState();
@@ -27,6 +34,8 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
         _selectedChallengeIds.add(challengeId);
       }
     });
+    // Live update parent when embedded as a tab
+    widget.onChanged?.call(List.from(_selectedChallengeIds));
   }
 
   @override
@@ -85,8 +94,8 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                     decoration: BoxDecoration(
                       color: isSelected
                           ? challenge.color.withValues(alpha: 0.15)
-                          : colorScheme.surfaceContainerHighest.withValues(alpha: 
-                              0.5,
+                          : colorScheme.surfaceContainerHighest.withValues(
+                              alpha: 0.5,
                             ),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
@@ -136,8 +145,8 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                                 child: Text(
                                   challenge.description,
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurface.withValues(alpha: 
-                                      0.6,
+                                    color: colorScheme.onSurface.withValues(
+                                      alpha: 0.6,
                                     ),
                                     height: 1.3,
                                   ),
@@ -210,7 +219,19 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
                     height: 50,
                     child: FilledButton.icon(
                       onPressed: () {
-                        Navigator.pop(context, _selectedChallengeIds);
+                        if (widget.onChanged != null) {
+                          // Embedded as tab – notify parent and show confirmation
+                          widget.onChanged!(_selectedChallengeIds);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('✅ Goals saved!'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        } else {
+                          // Pushed via Navigator – return result
+                          Navigator.pop(context, _selectedChallengeIds);
+                        }
                       },
                       icon: const Icon(Icons.check_circle),
                       label: const Text('Save Goals'),
@@ -230,5 +251,3 @@ class _ChallengesScreenState extends State<ChallengesScreen> {
     );
   }
 }
-
-

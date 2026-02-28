@@ -361,6 +361,84 @@ class FirestoreService {
     }
   }
 
+  // ── Family Nutrition Hub ──────────────────────────────────────────────────
+
+  /// Save (or update) a family member. Uses the member's [id] as the document key.
+  Future<void> saveFamilyMember(Map<String, dynamic> memberMap) async {
+    if (_userId == null) return;
+    final memberId = memberMap['id'] as String;
+    try {
+      await _firestore
+          .collection('users')
+          .doc(_userId)
+          .collection('family_members')
+          .doc(memberId)
+          .set({...memberMap, 'updatedAt': FieldValue.serverTimestamp()});
+    } catch (e) {
+      debugPrint('Error saving family member: $e');
+      rethrow;
+    }
+  }
+
+  /// Get all family members for this user.
+  Future<List<Map<String, dynamic>>> getFamilyMembers() async {
+    if (_userId == null) return [];
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(_userId)
+          .collection('family_members')
+          .get();
+      return snapshot.docs.map((d) => {...d.data(), 'id': d.id}).toList();
+    } catch (e) {
+      debugPrint('Error getting family members: $e');
+      return [];
+    }
+  }
+
+  /// Delete a family member by ID.
+  Future<void> deleteFamilyMember(String memberId) async {
+    if (_userId == null) return;
+    try {
+      await _firestore
+          .collection('users')
+          .doc(_userId)
+          .collection('family_members')
+          .doc(memberId)
+          .delete();
+    } catch (e) {
+      debugPrint('Error deleting family member: $e');
+      rethrow;
+    }
+  }
+
+  /// Persist the AI-generated family shopping list string.
+  Future<void> saveFamilyShoppingList(String list) async {
+    if (_userId == null) return;
+    try {
+      await _firestore.collection('users').doc(_userId).set({
+        'familyShoppingList': list,
+        'familyShoppingListUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error saving family shopping list: $e');
+    }
+  }
+
+  /// Retrieve the cached AI shopping list, or empty string if none.
+  Future<String> getFamilyShoppingList() async {
+    if (_userId == null) return '';
+    try {
+      final doc = await _firestore.collection('users').doc(_userId).get();
+      return (doc.data()?['familyShoppingList'] as String?) ?? '';
+    } catch (e) {
+      debugPrint('Error getting family shopping list: $e');
+      return '';
+    }
+  }
+
+  // ── Challenge History ─────────────────────────────────────────────────────
+
   // Get daily nutrition history for last N days (newest first)
   Future<List<Map<String, dynamic>>> getChallengeHistory(int days) async {
     if (_userId == null) return [];
@@ -377,6 +455,92 @@ class FirestoreService {
     } catch (e) {
       debugPrint('Error getting challenge history: $e');
       return [];
+    }
+  }
+
+  // ── Supplement Stack ────────────────────────────────────────────────────
+
+  /// Save the user's selected supplement IDs.
+  Future<void> saveSupplements(List<String> ids) async {
+    if (_userId == null) return;
+    try {
+      await _firestore.collection('users').doc(_userId).set({
+        'supplements': ids,
+        'supplementsUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error saving supplements: $e');
+    }
+  }
+
+  /// Retrieve the user's saved supplement IDs.
+  Future<List<String>> getSupplements() async {
+    if (_userId == null) return [];
+    try {
+      final doc = await _firestore.collection('users').doc(_userId).get();
+      if (doc.exists && doc.data()?['supplements'] != null) {
+        return List<String>.from(doc.data()!['supplements']);
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error getting supplements: $e');
+      return [];
+    }
+  }
+
+  // ── Smart Cart ──────────────────────────────────────────────────────────
+
+  /// Persist cart items to Firestore so any listener sees updates in real time.
+  Future<void> saveCart(List<Map<String, dynamic>> items) async {
+    if (_userId == null) return;
+    try {
+      await _firestore.collection('users').doc(_userId).set({
+        'cart': items,
+        'cartUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error saving cart: $e');
+    }
+  }
+
+  /// Stream of the number of items currently in the cart.
+  Stream<int> watchCartCount() {
+    if (_userId == null) return Stream.value(0);
+    return _firestore
+        .collection('users')
+        .doc(_userId)
+        .snapshots()
+        .map((doc) {
+      if (!doc.exists) return 0;
+      final cart = doc.data()?['cart'] as List?;
+      return cart?.length ?? 0;
+    });
+  }
+
+  /// Stream of the full cart item list.
+  Stream<List<Map<String, dynamic>>> watchCart() {
+    if (_userId == null) return Stream.value([]);
+    return _firestore
+        .collection('users')
+        .doc(_userId)
+        .snapshots()
+        .map((doc) {
+      if (!doc.exists) return <Map<String, dynamic>>[];
+      final cart = doc.data()?['cart'] as List?;
+      return (cart ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    });
+  }
+
+  /// Clear all items from the cart.
+  Future<void> clearCart() async {
+    if (_userId == null) return;
+    try {
+      await _firestore.collection('users').doc(_userId).set({
+        'cart': <dynamic>[],
+        'cartUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error clearing cart: $e');
     }
   }
 }

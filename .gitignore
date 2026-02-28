@@ -47,3 +47,7 @@ app.*.map.json
 # Firebase sensitive config files - DO NOT COMMIT
 google-services.json
 GoogleService-Info.plist
+
+# Local dev runner scripts containing API keys - DO NOT COMMIT
+run.bat
+run.sh

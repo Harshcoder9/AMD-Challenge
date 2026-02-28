@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -13,13 +14,22 @@ import 'services/nutrition_calculator.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/health_profile_screen.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'services/amd_inference_service.dart';
+import 'screens/video_analysis_screen.dart';
+import 'screens/smart_cart_screen.dart';
+import 'screens/supplement_optimizer_screen.dart';
+import 'screens/family_hub_screen.dart';
 
 // ─────────────────────────────────────────────
-// 🔑  GEMINI API KEY
-// Get one free at: https://aistudio.google.com/app/apikey
-// Leave it as 'YOUR_GEMINI_API_KEY_HERE' to run in safe demo mode (simulated responses)
-const _kGeminiApiKey = 'AIzaSyAXhrLsVLjRwx3Qe57lcKWKzBy_g2rwKsk';
-const _kDemoMode = _kGeminiApiKey == 'YOUR_GEMINI_API_KEY_HERE';
+// 🔑  GEMINI API KEY - never hardcode here!
+// Pass it at run/build time via --dart-define:
+//   flutter run --dart-define=GEMINI_API_KEY=your_key_here
+//   flutter build apk --dart-define=GEMINI_API_KEY=your_key_here
+// Get a key free at: https://aistudio.google.com/app/apikey
+// If no key is provided, the app runs in demo mode (simulated responses).
+const _kGeminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+const _kDemoMode = _kGeminiApiKey == '';
 // ─────────────────────────────────────────────
 
 // Challenge model class
@@ -268,12 +278,39 @@ class _HomePageState extends State<HomePage> {
   // Challenge history stats
   ChallengeStats? _challengeStats;
   Map<String, String> _challengeStartDates = {};
+  // AMD GPU backend availability flag
+  bool _amdBackendAvailable = false;
+  // Real-time cart item count (streamed from Firestore)
+  int _cartItemCount = 0;
+  List<Map<String, dynamic>> _cartCache = [];
+  StreamSubscription<int>? _cartCountSub;
+  StreamSubscription<List<Map<String, dynamic>>>? _cartSub;
+  // Whether the progress panel is expanded on narrow screens
+  bool _progressPanelExpanded = false;
+  // Current bottom-nav / rail tab index (0=Chat 1=Family 2=Supplements 3=Goals)
+  int _selectedTab = 0;
 
   @override
   void initState() {
     super.initState();
     _loadDataFromCloud();
     _loadWelcomeMessage();
+    _checkAmdBackend();
+    _cartCountSub = _firestoreService.watchCartCount().listen((count) {
+      if (mounted) setState(() => _cartItemCount = count);
+    });
+    _cartSub = _firestoreService.watchCart().listen((items) {
+      if (mounted) setState(() => _cartCache = items);
+    });
+  }
+
+  Future<void> _checkAmdBackend() async {
+    final available = await AmdInferenceService.isAvailable();
+    if (mounted) {
+      setState(() => _amdBackendAvailable = available);
+      if (available)
+        debugPrint('[AMD] ⚡ ROCm/Ollama backend detected and ready!');
+    }
   }
 
   Future<void> _loadWelcomeMessage() async {
@@ -408,6 +445,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _cartCountSub?.cancel();
+    _cartSub?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -651,6 +690,33 @@ class _HomePageState extends State<HomePage> {
     }
 
     // Route to specific feature handlers based on intent
+    // Smart Cart routing
+    if (lower.contains('smart cart') ||
+        lower.contains('grocery') ||
+        lower.contains('shopping list') ||
+        lower.contains('receipt') ||
+        lower.contains('supermarket')) {
+      await _launchSmartCart();
+      return;
+    }
+    // Supplement routing
+    if (lower.contains('supplement') ||
+        lower.contains('vitamins') ||
+        lower.contains('creatine') ||
+        lower.contains('my stack') ||
+        lower.contains('omega')) {
+      await _launchSupplementOptimizer();
+      return;
+    }
+    // Family Hub routing
+    if (lower.contains('family') ||
+        lower.contains('kid') ||
+        lower.contains('children') ||
+        lower.contains('family meal') ||
+        lower.contains('family hub')) {
+      await _launchFamilyHub();
+      return;
+    }
     if (lower.contains('cheat') ||
         lower.contains('credit') ||
         lower.contains('reward meal')) {
@@ -1136,6 +1202,32 @@ Return ONLY valid JSON with this structure:
   // ──────────────────────────────────────────────────────────
 
   /// Assembles the user's health profile + today's intake into a prompt string.
+  /// Builds a compact summary of current cart items for the AI system prompt.
+  String _buildCartContext() {
+    if (_cartCache.isEmpty) return '';
+    final lines = _cartCache
+        .map((item) {
+          final name = item['name'] ?? 'Unknown';
+          final score = item['healthScore'] ?? '';
+          final swap = item['healthierSwap'];
+          final cal =
+              (item['estimatedNutrition']?['calories'] as num?)?.toInt() ?? 0;
+          final pro =
+              (item['estimatedNutrition']?['protein'] as num?)?.toInt() ?? 0;
+          String line =
+              '  • $name (score: $score, ~${cal}kcal, ${pro}g protein';
+          if (swap != null) line += ', healthier swap: $swap';
+          line += ')';
+          return line;
+        })
+        .join('\n');
+    return '''
+User's Smart Grocery Cart (${_cartCache.length} items):
+$lines
+When asked about meal planning, shopping, or nutrition advice, reference these specific items and suggest how they can be combined or improved.
+''';
+  }
+
   String _buildUserContext(HealthProfile? profile) {
     if (profile == null) return '';
     final bmi = NutritionCalculator.calculateBMI(profile);
@@ -1530,6 +1622,7 @@ Challenge History (last ${_challengeStats!.totalDaysTracked} days tracked):
       final healthProfile = await _firestoreService.getHealthProfile();
       final userContext = _buildUserContext(healthProfile);
       final circadian = _getCircadianContext();
+      final cartContext = _buildCartContext();
 
       // Build recent conversation snippet for context continuity
       String historyStr = '';
@@ -1546,6 +1639,7 @@ Challenge History (last ${_challengeStats!.totalDaysTracked} days tracked):
 You are NutriBuddy, a knowledgeable and friendly nutrition AI assistant. You ONLY answer questions about nutrition, food, diet, health, fitness, and wellness. If asked about anything unrelated (weather, coding, sports scores, entertainment, etc.), politely decline and say you specialise only in nutrition and health.
 
 $userContext
+$cartContext
 $circadian
 $historyStr
 
@@ -1881,132 +1975,471 @@ Keep the tone warm and practical.
     }
   }
 
+  // ──────────────────────────────────────────────────────────
+  //  FEATURE LAUNCHERS
+  // ──────────────────────────────────────────────────────────
+
+  Future<void> _launchVideoAnalysis() async {
+    final result = await Navigator.push<AggregatedMealResult>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => VideoAnalysisScreen(
+          currentTotals: _currentTotals,
+          dailyGoals: _dailyGoals,
+          selectedChallenges: _selectedChallenges,
+          amdBackendAvailable: _amdBackendAvailable,
+          apiKey: _kGeminiApiKey,
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      final cal = result.totalNutrition['calories'] ?? 0.0;
+      final pro = result.totalNutrition['protein'] ?? 0.0;
+      final carbs = result.totalNutrition['carbs'] ?? 0.0;
+      final fat = result.totalNutrition['fat'] ?? 0.0;
+      final sugar = result.totalNutrition['sugar'] ?? 0.0;
+      setState(() {
+        _currentTotals['calories'] = (_currentTotals['calories'] ?? 0) + cal;
+        _currentTotals['protein'] = (_currentTotals['protein'] ?? 0) + pro;
+        _currentTotals['carbs'] = (_currentTotals['carbs'] ?? 0) + carbs;
+        _currentTotals['fat'] = (_currentTotals['fat'] ?? 0) + fat;
+        _currentTotals['sugar'] = (_currentTotals['sugar'] ?? 0) + sugar;
+        _messages.add(
+          ChatMessage(
+            text:
+                '🎬 Multi-frame scan complete!\n'
+                '📊 ${result.foodFrames} food frame${result.foodFrames == 1 ? '' : 's'} analyzed\n'
+                '• Calories: +${cal.toInt()} kcal\n'
+                '• Protein: +${pro.toInt()}g\n'
+                '• Carbs: +${carbs.toInt()}g\n'
+                '• Fat: +${fat.toInt()}g\n\n'
+                '✅ Added to today\'s log!',
+            isUser: false,
+          ),
+        );
+      });
+      await _firestoreService.saveDailyTotals(_currentTotals);
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _launchSmartCart() async {
+    setState(() {
+      _messages.add(
+        ChatMessage(
+          text:
+              '🛒 Smart Grocery Cart opened — your items will sync here in real time as you scan or add them!',
+          isUser: false,
+        ),
+      );
+    });
+    _scrollToBottom();
+    // Non-blocking: user can keep chatting while cart is open
+    Navigator.push<List<CartItem>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SmartCartScreen(
+          dailyGoals: _dailyGoals,
+          selectedChallenges: _selectedChallenges,
+          amdBackendAvailable: _amdBackendAvailable,
+          apiKey: _kGeminiApiKey,
+        ),
+      ),
+    ).then((items) {
+      if (!mounted) return;
+      if (items != null && items.isNotEmpty) {
+        setState(() {
+          _messages.add(
+            ChatMessage(
+              text:
+                  '✅ Cart session done! ${items.length} item${items.length == 1 ? '' : 's'} optimized and saved.',
+              isUser: false,
+            ),
+          );
+        });
+        _scrollToBottom();
+      }
+    });
+  }
+
+  Future<void> _launchSupplementOptimizer() async {
+    setState(() {
+      _messages.add(
+        ChatMessage(
+          text: '💊 Opening Supplement Stack Optimizer...',
+          isUser: false,
+        ),
+      );
+    });
+    _scrollToBottom();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SupplementOptimizerScreen(
+          selectedChallenges: _selectedChallenges,
+          currentTotals: _currentTotals,
+          dailyGoals: _dailyGoals,
+          amdBackendAvailable: _amdBackendAvailable,
+        ),
+      ),
+    );
+    if (mounted) {
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            text:
+                '✅ Supplement stack saved! Your personalized timing schedule has been updated.',
+            isUser: false,
+          ),
+        );
+      });
+      _scrollToBottom();
+    }
+  }
+
+  Future<void> _launchFamilyHub() async {
+    setState(() {
+      _messages.add(
+        ChatMessage(
+          text: '👨‍👩‍👧 Opening Family Nutrition Hub...',
+          isUser: false,
+        ),
+      );
+    });
+    _scrollToBottom();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FamilyHubScreen(apiKey: _kGeminiApiKey),
+      ),
+    );
+    if (mounted) {
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            text:
+                '✅ Family hub session complete! Meal plans and nutrition goals have been saved for your family.',
+            isUser: false,
+          ),
+        );
+      });
+      _scrollToBottom();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '🥗 NutriBuddy',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-            Text(
-              'Your nutrition companion',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w300),
-            ),
-          ],
-        ),
-        actions: [
-          // Challenges/Goals Button
-          Padding(
-            padding: const EdgeInsets.only(right: 4.0),
-            child: IconButton(
-              icon: Badge(
-                isLabelVisible: _selectedChallenges.isNotEmpty,
-                label: Text(_selectedChallenges.length.toString()),
-                child: const Icon(Icons.emoji_events),
-              ),
-              tooltip: 'Select Your Goals',
-              onPressed: () async {
-                final result = await Navigator.push<List<String>>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        ChallengesScreen(initialSelected: _selectedChallenges),
-                  ),
-                );
-                if (result != null) {
-                  setState(() {
-                    _selectedChallenges = result;
-                  });
-                  await _saveSelectedChallenges();
-                }
-              },
-            ),
+    final isWide = MediaQuery.of(context).size.width >= 600;
+
+    // ── Navigation destinations ─────────────────────────────────────────
+    const railDestinations = <NavigationRailDestination>[
+      NavigationRailDestination(
+        icon: Icon(Icons.chat_bubble_outline),
+        selectedIcon: Icon(Icons.chat_bubble),
+        label: Text('Chat'),
+      ),
+      NavigationRailDestination(
+        icon: Icon(Icons.people_outline),
+        selectedIcon: Icon(Icons.people),
+        label: Text('Family'),
+      ),
+      NavigationRailDestination(
+        icon: Icon(Icons.medication_outlined),
+        selectedIcon: Icon(Icons.medication),
+        label: Text('Supplements'),
+      ),
+      NavigationRailDestination(
+        icon: Icon(Icons.emoji_events_outlined),
+        selectedIcon: Icon(Icons.emoji_events),
+        label: Text('Goals'),
+      ),
+    ];
+
+    const barDestinations = <NavigationDestination>[
+      NavigationDestination(
+        icon: Icon(Icons.chat_bubble_outline, size: 22),
+        selectedIcon: Icon(Icons.chat_bubble, size: 22),
+        label: 'Chat',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.people_outline, size: 22),
+        selectedIcon: Icon(Icons.people, size: 22),
+        label: 'Family',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.medication_outlined, size: 22),
+        selectedIcon: Icon(Icons.medication, size: 22),
+        label: 'Supplements',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.emoji_events_outlined, size: 22),
+        selectedIcon: Icon(Icons.emoji_events, size: 22),
+        label: 'Goals',
+      ),
+    ];
+
+    // ── Tab content (IndexedStack keeps all alive) ─────────────────────
+    final tabs = <Widget>[
+      _buildChatBody(isWide),
+      FamilyHubScreen(apiKey: _kGeminiApiKey),
+      SupplementOptimizerScreen(
+        selectedChallenges: _selectedChallenges,
+        currentTotals: _currentTotals,
+        dailyGoals: _dailyGoals,
+        amdBackendAvailable: _amdBackendAvailable,
+      ),
+      ChallengesScreen(
+        initialSelected: _selectedChallenges,
+        onChanged: (list) {
+          setState(() => _selectedChallenges = list);
+          _saveSelectedChallenges();
+        },
+      ),
+    ];
+
+    // ── Chat AppBar (only shown on the Chat tab) ───────────────────────
+    final chatAppBar = AppBar(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            '🥗 NutriBuddy',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
-          // Settings Button
-          Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: IconButton(
-              icon: const Icon(Icons.settings),
-              tooltip: 'Settings',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const SettingsScreen(),
+          Row(
+            children: [
+              const Text(
+                'Your nutrition companion',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w300),
+              ),
+              if (_amdBackendAvailable) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
                   ),
-                );
-              },
-            ),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade700,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '⚡ AMD GPU',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Daily Summary Card at top
-          _buildDailySummaryCard(),
-
-          // Selected Challenges Chips
-          _buildChallengesChips(),
-
-          const Divider(height: 1),
-
-          // Chat Messages Section
-          Expanded(
-            child: _messages.isEmpty
-                ? const Center(
-                    child: Text('Start a conversation by sending a message'),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(8),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, index) {
-                      return _buildChatMessage(_messages[index]);
-                    },
-                  ),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 4.0),
+          child: IconButton(
+            icon: Badge(
+              isLabelVisible: _cartItemCount > 0,
+              label: Text(_cartItemCount.toString()),
+              backgroundColor: Colors.green,
+              child: const Icon(Icons.shopping_cart),
+            ),
+            tooltip: 'Smart Grocery Cart',
+            onPressed: _launchSmartCart,
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 8.0),
+          child: IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+            },
+          ),
+        ),
+      ],
+    );
 
-          // Loading indicator
-          if (_processingMessage != null)
-            Container(
-              padding: const EdgeInsets.all(16),
+    if (isWide) {
+      // ── Wide layout: NavigationRail on the left ─────────────────────
+      return Scaffold(
+        appBar: _selectedTab == 0 ? chatAppBar : null,
+        body: Row(
+          children: [
+            NavigationRail(
+              selectedIndex: _selectedTab,
+              onDestinationSelected: (i) => setState(() => _selectedTab = i),
+              labelType: NavigationRailLabelType.all,
+              destinations: railDestinations,
+              leading: const SizedBox(height: 8),
+            ),
+            const VerticalDivider(thickness: 1, width: 1),
+            Expanded(
+              child: IndexedStack(index: _selectedTab, children: tabs),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // ── Narrow layout: NavigationBar at the bottom ──────────────────
+      return Scaffold(
+        appBar: _selectedTab == 0 ? chatAppBar : null,
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedTab,
+          onDestinationSelected: (i) => setState(() => _selectedTab = i),
+          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+          height: 62,
+          destinations: barDestinations,
+        ),
+        body: IndexedStack(index: _selectedTab, children: tabs),
+      );
+    }
+  }
+
+  // Chat tab body – the full progress-panel + messaging UI
+  Widget _buildChatBody(bool isWide) {
+    // ── Shared chat column ────────────────────────────────────────────
+    Widget chatColumn = Column(
+      children: [
+        Expanded(
+          child: _messages.isEmpty
+              ? const Center(
+                  child: Text('Start a conversation by sending a message'),
+                )
+              : ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(8),
+                  itemCount: _messages.length,
+                  itemBuilder: (context, index) {
+                    return _buildChatMessage(_messages[index]);
+                  },
+                ),
+        ),
+        if (_processingMessage != null)
+          Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: _isAnalyzingImage
+                      ? const Icon(Icons.camera_alt, size: 20)
+                      : const CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    _processingMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_messages.length <= 2 && _processingMessage == null)
+          _buildSuggestedPrompts(),
+        _buildBottomInputBar(),
+      ],
+    );
+
+    if (isWide) {
+      // ── Wide: progress panel left + chat right ────────────────────
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            width: 230,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              border: Border(
+                right: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  width: 1,
+                ),
+              ),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildDailySummaryCard(),
+                  const Divider(height: 1),
+                  _buildChallengesChips(),
+                ],
+              ),
+            ),
+          ),
+          Expanded(child: chatColumn),
+        ],
+      );
+    } else {
+      // ── Narrow: collapsible progress header + chat ────────────────
+      final colorScheme = Theme.of(context).colorScheme;
+      return Column(
+        children: [
+          InkWell(
+            onTap: () => setState(
+              () => _progressPanelExpanded = !_progressPanelExpanded,
+            ),
+            child: Container(
+              color: colorScheme.surfaceContainerHighest,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: _isAnalyzingImage
-                        ? const Icon(Icons.camera_alt, size: 20)
-                        : const CircularProgressIndicator(strokeWidth: 2),
+                  Icon(
+                    Icons.track_changes,
+                    size: 16,
+                    color: colorScheme.primary,
                   ),
-                  const SizedBox(width: 12),
-                  Flexible(
+                  const SizedBox(width: 6),
+                  Expanded(
                     child: Text(
-                      _processingMessage!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w500,
+                      'Today\'s Progress & Goals',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.primary,
                       ),
                     ),
+                  ),
+                  Icon(
+                    _progressPanelExpanded
+                        ? Icons.expand_less
+                        : Icons.expand_more,
+                    size: 18,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ],
               ),
             ),
-
-          // Suggested prompt chips (show only at start of conversation)
-          if (_messages.length <= 2 && _processingMessage == null)
-            _buildSuggestedPrompts(),
-
-          // Bottom Input Bar with Media Upload
-          _buildBottomInputBar(),
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 200),
+            crossFadeState: _progressPanelExpanded
+                ? CrossFadeState.showFirst
+                : CrossFadeState.showSecond,
+            firstChild: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [_buildDailySummaryCard(), _buildChallengesChips()],
+            ),
+            secondChild: const SizedBox.shrink(),
+          ),
+          const Divider(height: 1),
+          Expanded(child: chatColumn),
         ],
-      ),
-    );
+      );
+    }
   }
 
   Widget _buildBottomInputBar() {
@@ -2052,6 +2485,22 @@ Keep the tone warm and practical.
                   backgroundColor: Theme.of(
                     context,
                   ).colorScheme.primaryContainer,
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // Multi-Frame Video Analysis Button
+              IconButton(
+                onPressed: _isAnalyzingImage ? null : _launchVideoAnalysis,
+                icon: const Icon(Icons.video_collection),
+                tooltip: 'Multi-Frame Meal Scan',
+                style: IconButton.styleFrom(
+                  backgroundColor: _amdBackendAvailable
+                      ? Colors.red.shade700.withValues(alpha: 0.15)
+                      : Theme.of(context).colorScheme.primaryContainer,
+                  foregroundColor: _amdBackendAvailable
+                      ? Colors.red.shade700
+                      : null,
                 ),
               ),
               const SizedBox(width: 8),
@@ -2100,165 +2549,214 @@ Keep the tone warm and practical.
   }
 
   Widget _buildChatMessage(ChatMessage message) {
-    return Align(
-      alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        child: Card(
-          color: message.isUser
-              ? Theme.of(context).colorScheme.primaryContainer
-              : Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Show image if present
-                if (message.image != null) ...[
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(
-                      message.image!,
-                      height: 200,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
+    final cs = Theme.of(context).colorScheme;
+    final isUser = message.isUser;
+
+    // Bubble shape: pointed corner on the sender's side
+    final bubbleRadius = BorderRadius.only(
+      topLeft: const Radius.circular(18),
+      topRight: const Radius.circular(18),
+      bottomLeft: Radius.circular(isUser ? 18 : 4),
+      bottomRight: Radius.circular(isUser ? 4 : 18),
+    );
+
+    final bubbleColor = isUser ? cs.primary : cs.surfaceContainerHighest;
+    final textColor = isUser ? cs.onPrimary : cs.onSurface;
+
+    Widget avatar = Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: isUser ? cs.primaryContainer : cs.secondaryContainer,
+      ),
+      child: Center(
+        child: Text(isUser ? '👤' : '🥗', style: const TextStyle(fontSize: 15)),
+      ),
+    );
+
+    Widget bubble = Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.72,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: bubbleColor,
+        borderRadius: bubbleRadius,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Sender label
+          Text(
+            isUser ? 'You' : 'NutriBuddy',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: isUser ? cs.onPrimary.withValues(alpha: 0.7) : cs.primary,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 4),
+
+          // Image if present
+          if (message.image != null) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.file(
+                message.image!,
+                height: 180,
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          // Message text
+          if (isUser)
+            Text(
+              message.text,
+              style: TextStyle(color: textColor, fontSize: 14, height: 1.4),
+            )
+          else
+            MarkdownBody(
+              data: message.text,
+              shrinkWrap: true,
+              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
+                  .copyWith(
+                    p: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: textColor,
+                      fontSize: 14,
+                      height: 1.45,
                     ),
+                    strong: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: textColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    listBullet: Theme.of(context).textTheme.bodyMedium
+                        ?.copyWith(color: textColor, fontSize: 14),
                   ),
-                  const SizedBox(height: 8),
-                ],
+            ),
 
-                // Show text
-                Text(
-                  message.text,
-                  style: TextStyle(
-                    color: message.isUser
-                        ? Theme.of(context).colorScheme.onPrimaryContainer
-                        : Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
+          // Show analysis data if present
+          if (message.analysisData != null) ...[
+            const SizedBox(height: 12),
+            _buildAnalysisCard(message.analysisData!),
+          ],
 
-                // Show analysis data if present
-                if (message.analysisData != null) ...[
-                  const SizedBox(height: 12),
-                  _buildAnalysisCard(message.analysisData!),
-                ],
-
-                // Mood prompt buttons
-                if (message.messageType == 'mood_prompt') ...[
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    children: ['😊', '😐', '😔', '😴', '😤'].map((emoji) {
-                      return InkWell(
-                        onTap: () => _saveMoodLog(
-                          message.foodNameForMood ?? 'food',
-                          emoji,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .primaryContainer
-                                .withValues(alpha: 0.5),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.primary.withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 20),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
-
-                // Recipe mode indicator
-                if (message.messageType == 'recipe_mode') ...[
-                  const SizedBox(height: 8),
-                  Container(
+          // Mood prompt buttons
+          if (message.messageType == 'mood_prompt') ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              children: ['😊', '😐', '😔', '😴', '😤'].map((emoji) {
+                return InkWell(
+                  onTap: () =>
+                      _saveMoodLog(message.foodNameForMood ?? 'food', emoji),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
+                      horizontal: 12,
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: Colors.green.withValues(alpha: 0.3),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.3),
                       ),
                     ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.edit_note, size: 14, color: Colors.green),
-                        SizedBox(width: 4),
-                        Text(
-                          'Awaiting your recipe...',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.green,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
+                    child: Text(emoji, style: const TextStyle(fontSize: 20)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+
+          // Recipe mode indicator
+          if (message.messageType == 'recipe_mode') ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.edit_note, size: 14, color: Colors.green),
+                  SizedBox(width: 4),
+                  Text(
+                    'Awaiting your recipe...',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.green,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
 
-                // Credit status indicator
-                if (message.messageType == 'credit_status') ...[
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: () {
-                      final match = RegExp(
-                        r'(\d+) / 100',
-                      ).firstMatch(message.text);
-                      if (match != null) {
-                        return (int.tryParse(match.group(1) ?? '0') ?? 0) /
-                            100.0;
-                      }
-                      return 0.0;
-                    }(),
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.primary.withValues(alpha: 0.15),
-                    color: Colors.amber,
-                    minHeight: 6,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ],
+          // Credit status indicator
+          if (message.messageType == 'credit_status') ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: () {
+                final match = RegExp(r'(\d+) / 100').firstMatch(message.text);
+                if (match != null) {
+                  return (int.tryParse(match.group(1) ?? '0') ?? 0) / 100.0;
+                }
+                return 0.0;
+              }(),
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.15),
+              color: Colors.amber,
+              minHeight: 6,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ],
 
-                // Timestamp
-                const SizedBox(height: 4),
-                Text(
-                  _formatTime(message.timestamp),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color:
-                        (message.isUser
-                                ? Theme.of(
-                                    context,
-                                  ).colorScheme.onPrimaryContainer
-                                : Theme.of(context).colorScheme.onSurface)
-                            .withValues(alpha: 0.6),
-                  ),
-                ),
-              ],
+          // Timestamp
+          const SizedBox(height: 4),
+          Text(
+            _formatTime(message.timestamp),
+            style: TextStyle(
+              fontSize: 10,
+              color: textColor.withValues(alpha: 0.55),
             ),
           ),
+        ],
+      ),
+    );
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: isUser
+              ? [bubble, const SizedBox(width: 6), avatar]
+              : [avatar, const SizedBox(width: 6), bubble],
         ),
       ),
     );
@@ -2613,27 +3111,34 @@ Keep the tone warm and practical.
   }
 
   Widget _buildSuggestedPrompts() {
-    final prompts = [
-      ('🥣', 'What should I eat now?'),
-      ('💳', 'Check my cheat credits'),
-      ('🍳', 'Healthify a recipe'),
-      ('📊', 'How are my macros?'),
-      ('💧', 'Hydration tips'),
+    // (icon, label, directAction) — null directAction uses text routing
+    final chips = <(String, String, Future<void> Function()?)>[
+      ('🥣', 'What should I eat now?', null),
+      ('💳', 'Check my cheat credits', null),
+      ('🍳', 'Healthify a recipe', null),
+      ('🛒', 'Smart grocery cart', () => _launchSmartCart()),
+      ('💊', 'My supplement stack', () => _launchSupplementOptimizer()),
+      ('�‍👩‍👧', 'Family nutrition hub', () => _launchFamilyHub()),
+      ('�📊', 'How are my macros?', null),
     ];
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: prompts.map((p) {
+          children: chips.map((c) {
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ActionChip(
-                avatar: Text(p.$1),
-                label: Text(p.$2, style: const TextStyle(fontSize: 12)),
+                avatar: Text(c.$1),
+                label: Text(c.$2, style: const TextStyle(fontSize: 12)),
                 onPressed: () {
-                  _messageController.text = p.$2;
-                  _sendTextMessage();
+                  if (c.$3 != null) {
+                    c.$3!();
+                  } else {
+                    _messageController.text = c.$2;
+                    _sendTextMessage();
+                  }
                 },
               ),
             );
