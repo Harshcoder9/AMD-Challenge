@@ -4,6 +4,12 @@
 
 ---
 
+## 🎥 Demo
+
+[![NutriBuddy Demo](https://img.youtube.com/vi/LDbSWp8nCPM/maxresdefault.jpg)](https://www.youtube.com/watch?v=LDbSWp8nCPM)
+
+---
+
 ## Problem Statement
 
 **Nutrition blindness is a global health crisis.** Over 2 billion people are either obese or malnourished — yet 90% have no idea what they're actually eating. Existing apps require tedious manual logging, ignore individual health profiles, and run entirely on centralised cloud AI — slow, expensive, and privacy-invasive.
